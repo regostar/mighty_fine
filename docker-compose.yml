@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "${PORT}:${PORT}"
+    environment:
+      - PORT=${PORT}
+      - REDIS_URL=${REDIS_URL}
+      - MAX_USAGE_MS=${MAX_USAGE_MS}
+      - CAPTION_INTERVAL_MS=${CAPTION_INTERVAL_MS}
+      - AUDIO_PACKET_MS=${AUDIO_PACKET_MS}
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:6-alpine
+    ports:
+      - "6379:6379"
