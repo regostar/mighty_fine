@@ -5,7 +5,10 @@ const usageRouter = require('./routes/usage');
 
 const app = express();
 
-// Mount the usage route
+// Use JSON middleware
+app.use(express.json());
+
+// Mount REST routes
 app.use('/usage', usageRouter);
 
 module.exports = app;
