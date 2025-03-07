@@ -1,7 +1,7 @@
 // ws/captioning.js
 const WebSocket = require('ws');
 const { CAPTION_INTERVAL_MS, AUDIO_PACKET_MS, MAX_USAGE_MS } = require('../config/config');
-const { incrementUsage, getUsage } = require('../services/usageService');
+const { getUsage, incrementUsage } = require('../services/usageService');
 const { sendCaption } = require('../services/captionService');
 
 /**
@@ -11,39 +11,40 @@ function setupCaptioning(server) {
   const wss = new WebSocket.Server({ server });
 
   wss.on('connection', (ws, req) => {
-    // Log the connection
     console.log('New WebSocket connection:', req.url);
-    
-    // Parse token from query parameters
+
+    // Parse token from query parameters (e.g., ws://localhost:3000?token=abc)
     const params = new URLSearchParams(req.url.replace(/^.*\?/, ''));
     const token = params.get('token') || 'anonymous';
 
-    // Initialize usage for this token if not already present
-    if (getUsage(token) === 0) {
-      console.log(`Initializing usage for token: ${token}`);
-    }
-
     // Set up a caption interval to simulate captioning every CAPTION_INTERVAL_MS
-    const captionInterval = setInterval(() => {
-      if (getUsage(token) >= MAX_USAGE_MS) {
-        ws.send(JSON.stringify({ error: 'Captioning time limit exceeded.' }));
-        ws.close();
-        clearInterval(captionInterval);
-      } else {
-        sendCaption(ws);
+    const captionInterval = setInterval(async () => {
+      try {
+        const usage = await getUsage(token);
+        if (usage >= MAX_USAGE_MS) {
+          ws.send(JSON.stringify({ error: 'Captioning time limit exceeded.' }));
+          ws.close();
+          clearInterval(captionInterval);
+        } else {
+          sendCaption(ws);
+        }
+      } catch (err) {
+        console.error('Error in caption interval:', err);
       }
     }, CAPTION_INTERVAL_MS);
 
-    // Handle incoming messages (simulate 100ms audio packets)
-    ws.on('message', (msg) => {
-      // For each message, increment usage by AUDIO_PACKET_MS
-      incrementUsage(token, AUDIO_PACKET_MS);
-
-      // If usage exceeds limit after increment, send error and close connection
-      if (getUsage(token) >= MAX_USAGE_MS) {
-        ws.send(JSON.stringify({ error: 'Captioning time limit exceeded.' }));
-        ws.close();
-        clearInterval(captionInterval);
+    // Handle incoming messages (simulate each message as 100ms of audio)
+    ws.on('message', async () => {
+      try {
+        await incrementUsage(token, AUDIO_PACKET_MS);
+        const usage = await getUsage(token);
+        if (usage >= MAX_USAGE_MS) {
+          ws.send(JSON.stringify({ error: 'Captioning time limit exceeded.' }));
+          ws.close();
+          clearInterval(captionInterval);
+        }
+      } catch (err) {
+        console.error('Error processing message:', err);
       }
     });
 
@@ -58,6 +59,4 @@ function setupCaptioning(server) {
   });
 }
 
-module.exports = {
-  setupCaptioning,
-};
+module.exports = { setupCaptioning };
