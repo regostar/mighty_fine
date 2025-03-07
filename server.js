@@ -1,15 +1,21 @@
-// Entry point of app
+/**
+ * server.js
+ *
+ * Entry point: creates the HTTP server, attaches the WebSocket server,
+ * and starts listening on a specified port (default: 3000).
+ */
 
 const http = require('http');
 const app = require('./app');
-const { setupWebSocket } = require('./ws/captioning');
+const { setupCaptioning } = require('./ws/captioning');
 
-const PORT = process.env.PORT || 3000;
+// Create HTTP server from the Express app
 const server = http.createServer(app);
 
-// Setup WebSocket server on top of the same HTTP server
-setupWebSocket(server);
+// Attach WebSocket logic
+setupCaptioning(server);
 
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });
