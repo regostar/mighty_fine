@@ -13,13 +13,18 @@ const { getUsage } = require('../services/usageService');
  * GET /usage?token=abc
  * Returns current usage in milliseconds for the given token.
  */
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const token = req.query.token;
   if (!token) {
     return res.status(400).json({ error: 'Missing token parameter' });
   }
-  const usage = getUsage(token);
-  res.json({ token, usage });
+  
+  try {
+    const usage = await getUsage(token);
+    return res.json({ token, usage });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
 });
 
 module.exports = router;
