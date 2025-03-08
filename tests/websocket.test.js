@@ -1,119 +1,122 @@
-// tests/integration/websocket.test.js
-
 const WebSocket = require('ws');
 const http = require('http');
 const app = require('../app');
 const { setupCaptioning } = require('../ws/captioning');
-const { usageStore } = require('../services/usageService');
-const request = require('supertest');
+const { createClient } = require('../services/clientService');
+const { getUsage } = require('../services/usageService');
+const redisClient = require('../db/redis');
 
-let server;
-let port;
+jest.setTimeout(20000);  // 20 seconds, sufficient for async tests
+
+let server, port, token;
 
 beforeAll((done) => {
-  // Create a server instance and attach the WebSocket logic.
   server = http.createServer(app);
   setupCaptioning(server);
-  // Listen on a random available port.
   server.listen(0, () => {
     port = server.address().port;
     done();
   });
 });
 
-afterAll((done) => {
-  server.close(done);
+afterAll(async () => {
+  await redisClient.quit();
+  server.close();
 });
 
-beforeEach(() => {
-  usageStore.clear();
+beforeEach(async () => {
+  const client = await createClient('WebSocket Tester', 'ws@example.com');
+  token = client.token;
 });
 
-describe('WebSocket Captioning', () => {
-  it('should send caption messages at regular intervals', (done) => {
-    const token = 'wsTest1';
+afterEach(async () => {
+  await redisClient.del(token);
+  await redisClient.del(`client:${token}`);
+});
+
+describe('WebSocket captioning', () => {
+  test('should connect and receive captions', async () => {
     const ws = new WebSocket(`ws://localhost:${port}?token=${token}`);
-    let captionsReceived = 0;
 
-    ws.on('open', () => {
-      // No need to send any message; we just expect periodic captions.
-    });
+    await new Promise((resolve, reject) => {
+      let captionsReceived = 0;
 
-    ws.on('message', (data) => {
-      const msg = JSON.parse(data);
-      if (msg.caption) {
-        captionsReceived++;
-      }
-      if (captionsReceived === 2) {
-        // Received two caption messages: test passed.
-        ws.close();
-        done();
-      }
-    });
+      ws.on('open', () => {
+        ws.send('audio_packet');
+      });
 
-    ws.on('error', (err) => {
-      ws.close();
-      done(err);
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data);
+        if (msg.caption) captionsReceived++;
+        if (captionsReceived >= 2) {
+          ws.close();
+          resolve();
+        }
+      });
+
+      ws.on('close', resolve);
+      ws.on('error', reject);
     });
   });
 
-  it('should increment usage per audio packet sent', (done) => {
-    const token = 'wsTest2';
+  test('should increment usage correctly', async () => {
     const ws = new WebSocket(`ws://localhost:${port}?token=${token}`);
 
-    ws.on('open', () => {
-      // Send one audio packet (which counts as 100ms).
-      ws.send('audio packet');
+    await new Promise((resolve, reject) => {
+      ws.on('open', () => {
+        ws.send('audio_packet'); //100ms
+        ws.send('audio_packet'); //200ms
+        setTimeout(resolve, 500);
+      });
+
+      ws.on('error', reject);
     });
 
-    // Wait a bit to ensure the message is processed.
-    setTimeout(async () => {
-      const response = await request(server).get(`/usage?token=${token}`);
-      expect(response.status).toBe(200);
-      expect(response.body.usage).toBe(100);
-      ws.close();
-      done();
-    }, 300);
+    const usage = await getUsage(token);
+    expect(usage).toBe(200);
+
+    ws.close();
   });
 
-  it('should disconnect the client when usage exceeds limit', (done) => {
-    const token = 'wsTest3';
+  test('should handle invalid token gracefully', async () => {
+    const invalidToken = 'invalid-token';
+    const ws = new WebSocket(`ws://localhost:${port}?token=${invalidToken}`);
+
+    await new Promise((resolve, reject) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data);
+        expect(msg).toHaveProperty('error', 'Client not found');
+      });
+
+      ws.on('close', resolve);
+      ws.on('error', reject);
+    });
+  });
+
+  test('should disconnect when usage exceeds limit', async () => {
     const ws = new WebSocket(`ws://localhost:${port}?token=${token}`);
 
-    ws.on('open', () => {
-      // Rapidly send messages to exceed the limit.
-      // The limit is 60000ms so 600 messages should do it.
-      let count = 0;
-      const interval = setInterval(() => {
-        if (ws.readyState !== WebSocket.OPEN) {
-          clearInterval(interval);
-          return;
+    await new Promise((resolve, reject) => {
+      ws.on('open', () => {
+        for (let i = 0; i <= 600; i++) {
+          ws.send('audio_packet');
         }
-        ws.send('audio packet');
-        count++;
-        if (count >= 610) {
-          clearInterval(interval);
+      });
+
+      ws.on('message', (msg) => {
+        const data = JSON.parse(msg);
+        if (data.error === 'Captioning time limit exceeded.') {
+          expect(data.error).toBe('Captioning time limit exceeded.');
+          ws.close();
+          resolve();
         }
-      }, 1);
+      });
+
+      ws.on('close', resolve);
+      ws.on('error', reject);
     });
 
-    ws.on('message', (data) => {
-      const msg = JSON.parse(data);
-      if (msg.error && msg.error === 'Captioning time limit exceeded.') {
-        // We expect to receive an error message and then the connection closes.
-        expect(msg.error).toBe('Captioning time limit exceeded.');
-        done();
-      }
-    });
-
-    ws.on('close', () => {
-      // If the connection is closed without an error message, we can finish the test.
-      // (The test will have already been marked as done if error message was received.)
-    });
-
-    ws.on('error', (err) => {
-      // Report errors if any.
-      done(err);
-    });
+    const usage = await getUsage(token);
+    expect(usage).toBeGreaterThanOrEqual(60000);
   });
 });

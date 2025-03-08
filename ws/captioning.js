@@ -1,4 +1,4 @@
-// ws/captioning.js
+
 const WebSocket = require('ws');
 const { CAPTION_INTERVAL_MS, AUDIO_PACKET_MS, MAX_USAGE_MS } = require('../config/config');
 const { getUsage, incrementUsage } = require('../services/usageService');
@@ -29,7 +29,10 @@ function setupCaptioning(server) {
           sendCaption(ws);
         }
       } catch (err) {
-        console.error('Error in caption interval:', err);
+        // If an error occurs (e.g., invalid token), send error and close connection
+        ws.send(JSON.stringify({ error: err.message }));
+        ws.close();
+        clearInterval(captionInterval);
       }
     }, CAPTION_INTERVAL_MS);
 
@@ -44,7 +47,10 @@ function setupCaptioning(server) {
           clearInterval(captionInterval);
         }
       } catch (err) {
-        console.error('Error processing message:', err);
+        // On error (like an invalid token), send error message and close connection
+        ws.send(JSON.stringify({ error: err.message }));
+        ws.close();
+        clearInterval(captionInterval);
       }
     });
 

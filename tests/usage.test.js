@@ -1,62 +1,36 @@
-// tests/integration/usage.test.js
-
 const request = require('supertest');
-const http = require('http');
 const app = require('../app');
-const { usageStore } = require('../services/usageService');
-const { setupCaptioning } = require('../ws/captioning');
+const { createClient } = require('../services/clientService');
+const redisClient = require('../db/redis');
 
-let server;
+describe('GET /usage', () => {
+  let token;
 
-beforeAll((done) => {
-  // Create a server instance and attach the WebSocket logic.
-  server = http.createServer(app);
-  setupCaptioning(server);
-  // Listen on a random available port.
-  server.listen(0, done);
-});
-
-afterAll((done) => {
-  server.close(done);
-});
-
-beforeEach(() => {
-  // Clear the in-memory usage store before each test.
-  usageStore.clear();
-});
-
-describe('REST /usage Endpoint', () => {
-  it('should return 0 usage for a new token', async () => {
-    const token = 'abc';
-    const response = await request(server).get(`/usage?token=${token}`);
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ token, usage: 0 });
+  afterEach(async () => {
+    // Cleanup Redis keys for the client token created in each test.
+    if (token) {
+      await redisClient.del(token);
+      await redisClient.del(`client:${token}`);
+      token = null;
+    }
   });
 
-  it('should reflect increased usage after WebSocket messages', async () => {
-    const token = 'test123';
-    // Open a WebSocket connection and send one message.
-    const WebSocket = require('ws');
-    const port = server.address().port;
-    const ws = new WebSocket(`ws://localhost:${port}?token=${token}`);
+  afterAll(async () => {
+    // Close the Redis client after tests.
+    await redisClient.quit();
+  });
 
-    // Wait for the connection to open, then send a message.
-    await new Promise((resolve, reject) => {
-      ws.on('open', () => {
-        ws.send('audio packet');
-        resolve();
-      });
-      ws.on('error', reject);
-    });
+  it('returns 0 usage for a new client', async () => {
+    const client = await createClient('Usage Tester', 'usage@example.com');
+    token = client.token;
+    const res = await request(app).get(`/usage?token=${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.usage).toBe(0);
+  });
 
-    // Allow some time for the server to process the message.
-    await new Promise((r) => setTimeout(r, 300));
-
-    // Verify that the usage has been incremented by 100ms.
-    const response = await request(server).get(`/usage?token=${token}`);
-    expect(response.status).toBe(200);
-    expect(response.body.usage).toBe(100);
-
-    ws.close();
+  it('returns an error for invalid token', async () => {
+    const res = await request(app).get('/usage?token=invalidtoken');
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'Client not found' });
   });
 });
