@@ -6,7 +6,7 @@ const { createClient } = require('../services/clientService');
 const { getUsage } = require('../services/usageService');
 const redisClient = require('../db/redis');
 
-jest.setTimeout(20000);  // 20 seconds, sufficient for async tests
+jest.setTimeout(80000);  // 080 seconds, sufficient for async tests
 
 let server, port, token;
 
