@@ -45,4 +45,3 @@ Access usage via:
 
 GET http://localhost:3000/usage?token=your_unique_token
 
-.
